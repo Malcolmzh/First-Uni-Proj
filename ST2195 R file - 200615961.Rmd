@@ -1,0 +1,683 @@
+---
+title: "ST2195 Question 1 to 5 - ID: 200615961"
+output: html_document
+---
+Installing the packages
+```{r}
+#install.packages("RSQLite")
+#install.packages("DBI")
+#install.packages("dplyr")
+#install.packages("data.table")
+#install.packages("lubridate")
+#install.packages("tibble")
+#install.packages("stringi")
+#install.packages("ggplot2")
+#install.packages("scales")
+#install.packages("ggpubr")
+#install.packages("mlr3")
+#install.packages("mlr3learners")
+#install.packages("mlr3pipelines")
+#install.packages("mlr3tuning")
+#install.packages("mlr3viz")
+#install.packages("knitr")
+#install.packages("broom")
+#install.packages("xgboost")
+#install.packages("e1071")
+#install.packages("caret")
+#install.packages("InformationValue")
+#install.packages("ISLR")
+#install.packages("pROC")
+```
+
+Set the libraries
+```{r}
+library(knitr)
+library(RSQLite)
+library(DBI)
+library(dplyr)
+library(data.table)
+library(lubridate)
+library(tibble)
+library(stringi)
+library(ggplot2)
+library(scales)
+library(ggpubr)
+library(ggrepel)
+library(mlr3)
+library(mlr3learners)
+library(mlr3pipelines)
+library(mlr3tuning)
+library(mlr3viz)
+library(e1071)
+library(broom)
+library(caret)
+library(InformationValue)
+library(ISLR)
+library(pROC)
+```
+
+Set the working directory and knitr for easier reading
+```{r}
+setwd("/Users/malcolmteo/Desktop/Programming Exam")
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+Set the base
+````{r}
+#Create a new SQL database called airline2_r 
+base <- dbConnect(RSQLite::SQLite(), "airline2_r.db")
+
+#Read the various csv files in the folder
+airports <- read.csv("airports.csv", header = TRUE)
+carriers <- read.csv("carriers.csv", header = TRUE)
+planes <- read.csv("plane-data.csv", header = TRUE)
+
+#Upload the previous three tables into the databaase
+dbWriteTable(base, "airports", airports, overwrite = TRUE)
+dbWriteTable(base, "carriers", carriers, overwrite = TRUE)
+dbWriteTable(base, "planes", planes, overwrite = TRUE)
+
+#Read the various csv files in the folder
+a2004 <- read.csv("2004.csv", header = TRUE)
+a2005 <- read.csv("2005.csv", header = TRUE)
+
+#Combine the two new data frames - a2004 and a2005 - into a single data frame called alpha
+alpha <- union(a2004,a2005)
+
+#Remove na values in alpha and planes data frame
+alpha <- na.omit(alpha)
+planes <- na.omit(planes)
+
+#Save ram space
+rm(a2004) 
+rm(a2005)
+```
+
+Specify Day, Month, Time of Day, Time of Year, Punctuality 
+```{r}
+#Use conditions to create new columns within the data frame
+alpha$DepTimeofDay <-  ifelse(alpha$DepTime <= 600, "Midnight",
+                      ifelse(alpha$DepTime <= 1200, "Morning",
+                      ifelse(alpha$DepTime <= 1800, "Afternoon",
+                      ifelse(alpha$DepTime <= 2400, "Night",
+                      ifelse(alpha$DepTime <= 3000, "Midnight",
+"Wrong")))))
+
+alpha$Day <-  ifelse(alpha$DayOfWeek == 1, "Mon",
+              ifelse(alpha$DayOfWeek == 2, "Tues",
+              ifelse(alpha$DayOfWeek == 3, "Wed",
+              ifelse(alpha$DayOfWeek == 4, "Thurs",
+              ifelse(alpha$DayOfWeek == 5, "Fri",
+              ifelse(alpha$DayOfWeek == 6, "Sat",
+              ifelse(alpha$DayOfWeek == 7, "Sun",
+"Wrong")))))))
+
+alpha$TimeofYear <- ifelse(alpha$Month <=3, "First Quarter",
+                    ifelse(alpha$Month <=6, "Second Quarter",
+                    ifelse(alpha$Month <=9, "Third Quarter",
+                    ifelse(alpha$Month <=12, "Fourth Quarter",
+"Wrong"))))
+
+alpha$Mth <-  ifelse(alpha$Month == 1, "Jan",
+                    ifelse(alpha$Month == 2, "Feb",
+                    ifelse(alpha$Month == 3, "Mar",
+                    ifelse(alpha$Month == 4, "Apr",
+                    ifelse(alpha$Month == 5, "May",
+                    ifelse(alpha$Month == 6, "Jun",
+                    ifelse(alpha$Month == 7, "Jul",
+                    ifelse(alpha$Month == 8, "Aug",
+                    ifelse(alpha$Month == 9, "Sep",
+                    ifelse(alpha$Month == 10, "Oct",
+                    ifelse(alpha$Month == 11, "Nov",
+                    ifelse(alpha$Month == 12, "Dec",
+"Wrong"))))))))))))
+
+alpha$Punctuality <- ifelse(alpha$ArrDelay <=0, "Early",
+                            "Late")
+
+# Append into DBI
+dbWriteTable(base, "alpha", alpha, overwrite = TRUE)
+```
+
+Question 1:
+Best time of the day & year to fly
+```{r}
+#Create a bar plot for best time of day to fly referencing the departure delay
+alpha %>%
+  mutate(DepTimeofDay = factor(x=DepTimeofDay,
+                               levels=c("Morning", "Afternoon", 
+                                        "Night", "Midnight"))) %>%
+  ggplot(aes(x=DepTimeofDay, 
+             y= DepDelay)) +
+  stat_summary (fun = "mean",
+                geom = "bar",
+                fill = "blue", 
+                alpha = 0.7) +
+  theme_classic() +
+  ggtitle("Time of Day against Average Departure Delay") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  xlab("Time of Day") +
+  ylab("Average Departure Delay")
+
+#The fourth quarter is least delayed on average at 34.6 mins
+#This is considering when there is departure and arrival Delay
+Best_TimeGivenADDD <- dbGetQuery(base,
+  "SELECT TimeofYear as TimeofYear, AVG(DepDelay) as Avg_DepDelay
+  FROM alpha
+  WHERE alpha.DepDelay >0 AND alpha.ArrDelay >0
+  GROUP BY TimeofYear
+  ORDER by Avg_DepDelay"
+)
+
+#The fourth quarter is least delayed on average at 28.54 mins
+#This is considering when there is only departure delay
+Best_TimeGivenDD <- dbGetQuery(base,
+  "SELECT TimeofYear as TimeofYear, AVG(DepDelay) as Avg_DepDelay
+  FROM alpha
+  WHERE alpha.DepDelay >0
+  GROUP BY TimeofYear
+  ORDER by Avg_DepDelay"
+)
+
+#The second quarter is least delayed on average at 7.59 mins
+#This is when considering the whole population
+Best_Time <- dbGetQuery(base,
+  "SELECT TimeofYear as TimeofYear, AVG(DepDelay) as Avg_DepDelay
+  FROM alpha
+  GROUP BY TimeofYear
+  ORDER by Avg_DepDelay"
+)
+
+#The second quarter, months april, may, june, has the lowest departure delay
+Best_Time %>%
+  mutate(TimeofYear = factor(TimeofYear, 
+                            levels = c("First Quarter", "Second Quarter",
+                                       "Third Quarter", "Fourth Quarter"))) %>%
+  ggplot(aes(x = TimeofYear, y = Avg_DepDelay, group = 1)) +
+  geom_line() +
+  ggtitle("Average Departure Delay based on Quarters") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+    xlab("Quarter") +
+    ylab("Average Departure Delay")
+
+#April is the least delayed due to weather on average at 0.37 mins
+Best_Time_Weather<- dbGetQuery(base,
+  "SELECT Month as Month, ROUND(AVG(alpha.WeatherDelay),2) as Avg_WeatherDelay
+  FROM alpha
+  GROUP BY Month
+  ORDER by Avg_WeatherDelay"
+)
+
+#Create a line chart for the average weather delay based on months of the year
+Best_Time_Weather %>%
+  ggplot(aes(x = Month, y = Avg_WeatherDelay, group = 1)) +
+  geom_line() +
+  geom_label(aes(label = Month),
+              nudge_x = 0.05,
+              nudge_y = 0.05,
+              size = 3) +
+  ggtitle("Average Weather Delay based on Months") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+    xlab("Month") +
+    ylab("Average Weather Delay")
+
+#September is the least delayed due to NAS delays on average at 2.22 mins
+Best_NAS<- dbGetQuery(base,
+  "SELECT Month as Month, ROUND(AVG(alpha.NASDelay),2) as Avg_NASDelay
+  FROM alpha
+  GROUP BY Month
+  ORDER by Avg_NASDelay"
+)
+
+#Create a line chart for the average NAS delay based on months of the year
+Best_NAS %>%
+  ggplot(aes(x = Month, y = Avg_NASDelay, group = 1)) +
+  geom_line() +
+  geom_label(aes(label = Month),
+              nudge_x = 0.05,
+              nudge_y = 0.05,
+              size = 3) +
+  ggtitle("Average NAS Delay based on Months") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+    xlab("Month") +
+    ylab("Average NAS Delay")
+
+#Save ram
+rm(Best_TimeGivenADDD)
+rm(Best_TimeGivenDD)
+rm(Best_Time)
+rm(Best_Time_Weather)
+rm(Best_NAS)
+```
+
+Question 1: 
+Finding relationship based on Day of Month: Departure & Arrival
+```{r}
+#3rd is the least delayed at an average of 32.10 mins for departure and
+#33.22 mins for arrival 
+#This is given that there is arrival and departure delay
+Day_DelaysGivenADDD <- dbGetQuery(base,
+  "SELECT DayofMonth as DayofMonth, AVG(DepDelay) as Avg_DepDelay, 
+  AVG(ArrDelay) as Avg_ArrDelay, Day as Day
+  FROM alpha
+  WHERE alpha.ArrDelay >0 AND alpha.DepDelay >0
+  GROUP BY DayofMonth
+  ORDER by Avg_DepDelay"
+)
+
+#3rd has the lowest departure delay at 23.06 mins on average 
+#This is given that there is only departure delay
+Day_DepDelaysGivenDD <- dbGetQuery(base,
+  "SELECT DayofMonth as DayofMonth, AVG(DepDelay) as Avg_DepDelay, Day as Day
+  FROM alpha
+  WHERE alpha.DepDelay >0
+  GROUP BY DayofMonth
+  ORDER by Avg_DepDelay"
+)
+
+#3rd has the lowest arrival delay at 24.08 mins on average
+#This is when considering only arrival delay  
+Day_ArrDelaysGivenAD <- dbGetQuery(base,
+  "SELECT DayofMonth as DayofMonth, AVG(ArrDelay) as Avg_ArrDelay, Day as Day
+  FROM alpha
+  WHERE alpha.ArrDelay >0
+  GROUP BY DayofMonth
+  ORDER by Avg_ArrDelay"
+)
+
+#3rd is the least delayed at an average of 6.14 mins for departure and 
+#3.97 mins for arrival
+#This is when considering the whole population
+Day_Delays <- dbGetQuery(base,
+  "SELECT DayofMonth as DayofMonth, AVG(DepDelay) as Avg_DepDelay, 
+  AVG(ArrDelay) as Avg_ArrDelay, Day as Day
+  FROM alpha
+  GROUP BY DayofMonth
+  ORDER by Avg_DepDelay"
+)
+
+#Create a box plot showing the arrival delay based on days of the week
+AD1 <- Day_Delays %>%
+  mutate(Day = factor(Day,
+                      levels = c("Mon", "Tues", "Wed", "Thurs",
+                                       "Fri", "Sat", "Sun"))) %>%
+  ggplot(aes(x = Day, y = Avg_ArrDelay)) +
+  geom_boxplot(fill = "skyblue") +
+  stat_summary(fun = mean, geom = "point", colour = "red") +
+  stat_summary(fun = mean, geom = "text", colour = "red", vjust = 6.1,
+               aes(label = paste("Mean:", round(..y..,1)))) +
+  ggtitle("Average Arrival Delay based on Day of Week") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+    xlab("Day of Week") +
+    ylab("Average Arrival Delay")
+
+#Create a box plot showing the departure delay based on days of the week
+DD1 <- Day_Delays %>%
+  mutate(Day = factor(Day,
+                      levels = c("Mon", "Tues", "Wed", "Thurs",
+                                       "Fri", "Sat", "Sun"))) %>%
+  ggplot(aes(x = Day, y = Avg_DepDelay)) +
+  geom_boxplot(fill = "skyblue") +
+  stat_summary(fun = mean, geom = "point", colour = "red") +
+  stat_summary(fun = mean, geom = "text", colour = "red", vjust = 6.8,
+               aes(label = paste("Mean:", round(..y.., 1)))) +
+  ggtitle("Average Departure Delay based on Day of Week") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+    xlab("Day of Week") +
+    ylab("Average Departure Delay")
+
+#Create a box plot showing the arrival delay based on days of the month
+AD2 <- Day_Delays %>%
+  ggplot(aes(x = DayofMonth, y = Avg_ArrDelay)) +
+  geom_line(colour = "blue") +
+  geom_point(colour = "black") +
+  geom_label(aes(label = round(Avg_ArrDelay, 2)),
+            nudge_x = 0.25,
+            nudge_y = 0.25,
+            size = 3) +
+  ggtitle("Average Arrival Delay based on Day of Month") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+    xlab("Day of Month") +
+    ylab("Average Arrival Delay")
+
+#Create a box plot showing the departure delay based on days of the month
+DD2 <- Day_Delays %>%
+  ggplot(aes(x = DayofMonth, y = Avg_DepDelay)) +
+  geom_line(colour = "blue") +
+  geom_point(colour = "black") +
+  geom_label(aes(label = round(Avg_DepDelay, 2)),
+            nudge_x = 0.25,
+            nudge_y = 0.25,
+            size = 3) +
+  ggtitle("Average Departure Delay based on Day of Month") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+    xlab("Day of Month") +
+    ylab("Average Departure Delay")
+
+#Arrange the charts based on a customised order
+ggarrange(AD1, DD1, 
+          labels = c("A", "B"),
+          ncol = 2, nrow = 1)
+
+#Arrange the charts based on a customised order
+ggarrange(AD2, DD2, 
+          labels = c("C", "D"),
+          ncol = 2, nrow = 1)
+
+
+#Save ram
+rm(Day_DelaysGivenADDD)
+rm(Day_DepDelaysGivenDD)
+rm(Day_ArrDelaysGivenAD)
+rm(Day_Delays)
+```
+
+Question 1: 
+Finding relationship based on the Month: Arrival & Departure
+```{r}
+#April is the least delayed at an average of 31.16 mins for departure and 
+#32.57 for arrival. 
+#This is given that there is arrival and departure delay
+Month_DelaysGivenADDDwithDistance <- dbGetQuery(base,
+  "SELECT Mth as Month, AVG(DepDelay) as Avg_DepDelay, 
+  AVG(ArrDelay) as Avg_ArrDelay, AVG(distance) as Avg_Distance
+  FROM alpha
+  WHERE alpha.ArrDelay >0 AND alpha.DepDelay >0
+  GROUP BY Month
+  ORDER BY Avg_DepDelay"
+)
+
+#April is the least delayed at an average of 24.98 mins for departure and 
+#23.06 mins for arrival
+#This is given that there is only departure delay
+Month_DelaysGivenDDwithDistance <- dbGetQuery(base,
+  "SELECT Mth as Month, AVG(DepDelay) as Avg_DepDelay, 
+  AVG(ArrDelay) as Avg_ArrDelay,  AVG(distance) as Avg_Distance
+  FROM alpha
+  WHERE alpha.DepDelay >0
+  GROUP BY Month
+  ORDER BY Avg_DepDelay"
+)
+
+#September is the least delayed at an average of 4.45 mins for departure and 
+#1.85 mins for arrival.
+#Average delays seems to increase alongside average distance
+Month_DelayswithDistance <- dbGetQuery(base,
+  "SELECT Mth as Month, AVG(DepDelay) as Avg_DepDelay, 
+  AVG(ArrDelay) as Avg_ArrDelay, AVG(distance) as Avg_Distance
+  FROM alpha
+  GROUP BY Month
+  ORDER BY Avg_DepDelay"
+)
+
+#Create a line chart for average departure delays based on the different months
+MDD <- Month_DelayswithDistance %>%
+  mutate(Month = factor(Month,
+                      levels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"))) %>%
+  ggplot(aes(x = Month, y = Avg_DepDelay, group = 1)) +
+  stat_summary(fun = mean, geom = "line", colour = "red") +
+  stat_summary(fun = mean, geom = "point", colour = "black") +
+  stat_summary(fun = mean, geom = "text", colour = "blue", vjust = 1, hjust = 0.4, size = 3,
+               aes(label = paste("Mean:", round(..y.., 1)))) +
+  ggtitle("Average Departure Delay based on Month") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+    xlab("Month") +
+    ylab("Average Departure Delay")
+
+#Create a line chart for average arrival delays based on the different months
+MAD <- Month_DelayswithDistance %>%
+  mutate(Month = factor(Month,
+                      levels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"))) %>%
+  ggplot(aes(x = Month, y = Avg_ArrDelay, group = 1)) +
+  stat_summary(fun = mean, geom = "line", colour = "red") +
+  stat_summary(fun = mean, geom = "point", colour = "black") +
+  stat_summary(fun = mean, geom = "text", colour = "blue", vjust = 1, size = 3,
+               aes(label = paste("Mean:", round(..y.., 1)))) +
+  ggtitle("Average Arrival Delay based on Month") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+    xlab("Month") +
+    ylab("Average Arrival Delay")
+
+#Create a line chart for average distance traveled based on the different months
+MDist <- Month_DelayswithDistance %>%
+  mutate(Month = factor(Month,
+                      levels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"))) %>%
+  ggplot(aes(x = Month, y = Avg_Distance, group = 1)) +
+  stat_summary(fun = mean, geom = "line", colour = "red") +
+  stat_summary(fun = mean, geom = "point", colour = "black") +
+  stat_summary(fun = mean, geom = "text", colour = "blue", vjust = 1, size = 3,
+               aes(label = paste("Mean:", round(..y.., 1)))) +
+  ggtitle("Average Distance based on Month") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+    xlab("Month") +
+    ylab("Average Distance")
+
+#Arrange the charts based on a customised order
+ggarrange(MDD, MAD, MDist, 
+          labels = c("E", "F", "G"), nrow = 3)
+
+#Save ram
+rm(Month_DelaysGivenADDDwithDistance)
+rm(Month_DelaysGivenDDwithDistance)
+rm(Month_DelayswithDistance)
+```
+
+Question 2: 
+Do older planes suffer more delays?
+```{r}
+#Create new column referencing issue date
+planes$issue_year = stri_sub(planes$issue_date,-4)
+
+#Join alpha and planes data frame into total_flights
+total_flights <- left_join(alpha, planes, by = c("TailNum" = "tailnum"))
+
+#Get age of planes through the subtraction and conversion of issue_year to an integer
+total_flights$Age <- total_flights$Year - as.integer(total_flights$issue_year)
+
+#Create a 100% stacked bar chart showing the punctuality of planes based on their age
+PlanesAge <- total_flights %>%
+  na.omit() %>%
+  ggplot(aes(x = Age, fill = Punctuality, labels = Age)) +
+    geom_bar(position = "fill") +
+    ggtitle("Percentage of Flights that are Puncutal based on Age") +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    theme_classic() +
+    xlab("Planes Age") +
+    ylab("Percentage of Flights") +
+    guides(fill = guide_legend("Punctuality")) 
+
+#Create a 100% stacked bar chart showing the punctuality of planes based on their Manufacturer
+Manufacturer <- total_flights %>%
+  na.omit() %>%
+  ggplot(aes(x = manufacturer, fill = Punctuality)) +
+  geom_bar(position = "fill") +
+  ggtitle("Percentage of Flights that are Puncutal based on Manufacturer") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  xlab("Manufacturer") +
+  ylab("Percentage of Flights") +
+  guides(fill = guide_legend("Punctuality")) 
+
+#Arrange the charts based on a customised order
+ggarrange(PlanesAge, Manufacturer, 
+          labels = c("H", "I"), ncol = 2)
+
+```
+
+Question 3: 
+How does the number of people flying between different locations change over time?
+```{r}
+#Create a new data frame with specific columns referencing year 2004
+Avg_no_of_flights_2004 <- dbGetQuery(base,
+  "SELECT Dest as Destination, Year as Year1, COUNT(DepTime) as FrequencyX, 
+  SUM(Distance) as Total_DistanceX
+  FROM alpha
+  WHERE alpha.Year = 2004
+  GROUP BY Destination
+  Order BY FrequencyX"
+)
+#Create a new data frame with specific columns referencing year 2005
+Avg_no_of_flights_2005 <- dbGetQuery(base,
+  "SELECT Dest as Destination, Year as Year2, COUNT(DepTime) as FrequencyY, 
+  SUM(Distance) as Total_DistanceY
+  FROM alpha
+  WHERE alpha.Year = 2005 
+  GROUP BY Destination
+  Order BY FrequencyY"
+)
+
+#Combine the two data frames
+Avg_no_of_flights <- left_join(Avg_no_of_flights_2004, Avg_no_of_flights_2005, by = "Destination")
+
+#Replacement to na.omit as it does not work 
+Avg_no_of_flights <- Avg_no_of_flights[complete.cases(Avg_no_of_flights),]
+
+#Keep any values greater than 30 under FrequencyX column
+#The removal of values under 30 applied for FreqY as well
+Avg_no_of_flights <- subset(Avg_no_of_flights, FrequencyX >30,)
+
+#Use arithmetic formulas to get the difference in frequency between the two years
+Avg_no_of_flights$Difference_F <- Avg_no_of_flights$FrequencyY - Avg_no_of_flights$FrequencyX
+
+#Use arithmetic formulas to get the percentage change between the two years
+Avg_no_of_flights$Percentage_ChangeF <- 
+  round(Avg_no_of_flights$Difference_F / Avg_no_of_flights$FrequencyX * 100, 2)
+
+#The change of average number of flights during 2004 and 2005 is 2.72%
+print(paste0("The change of average number of flights during 2004 and 2005 is ", round(mean(Avg_no_of_flights[["Percentage_ChangeF"]]),2),"%"))
+
+#Use arithmetic formulas to get the average distance travelled in their respective years
+Avg_no_of_flights$Avg_DistX <- 
+  (Avg_no_of_flights$Total_DistanceX / Avg_no_of_flights$FrequencyX)
+Avg_no_of_flights$Avg_DistY <-
+  (Avg_no_of_flights$Total_DistanceY / Avg_no_of_flights$FrequencyY)
+
+#Use arithmetic formulas to get the difference in distance between the two years
+Avg_no_of_flights$Difference_D <-round(Avg_no_of_flights$Avg_DistY - Avg_no_of_flights$Avg_DistX,4)
+
+#Use arithmetic formulas to get the percentage change between the two years
+Avg_no_of_flights$Percentage_ChangeD <-
+  round(Avg_no_of_flights$Difference_D / Avg_no_of_flights$Avg_DistX *100, 2)
+
+#The change of average distance traveled by flights during 2004 and 2005 is 2.37%
+print(paste0("The change of average distance of traveled flights during 2004 and 2005 is ", round(mean(Avg_no_of_flights[["Percentage_ChangeD"]]),2),"%"))
+
+#Save ram
+rm(Avg_no_of_flights_2004)
+rm(Avg_no_of_flights_2005)
+rm(Avg_no_of_flights)
+```
+
+Question 4: 
+Can you detect cascading failures as delays in one airport create delays in others?
+Using linear regression to answer how Departure and Arrival delay is correlated.
+```{r}
+Airport_Delay <- dbGetQuery(base,
+  "SELECT Dest as Destination, AVG(DepDelay) as Avg_Departure_Delay, 
+  AVG(ArrDelay) as Avg_Arrival_Delay
+  FROM alpha
+  GROUP BY Destination
+  ORDER BY Avg_Departure_Delay
+")
+
+Airport_Delay <- na.omit(Airport_Delay)
+
+round(cor(Airport_Delay$Avg_Departure_Delay, Airport_Delay$Avg_Arrival_Delay),3)
+#Get the correlation for both departure and arrival delay
+#0.824 shows that both data are highly correlated 
+
+dep.arr.lm <- lm(Avg_Arrival_Delay ~ Avg_Departure_Delay, data = Airport_Delay)
+#Obtain a linear regression analysis
+
+summary(dep.arr.lm)
+#This shows that there is a significant positive relationship between arrival 
+#and departure delay, with a 0.7861 (+/- 0.0001) unit increase in departure
+#delay for every unit increase in arrival delay
+
+plot(dep.arr.lm)
+#The plots shows that departure and arrival delay is so highly correlated that
+#the mean line deviates so much that the homoscedasticity assumption is invalid
+#https://www.scribbr.com/statistics/linear-regression-in-r/
+```
+
+Question 5:
+Use the available variables to construct a model that predicts delays.
+Using gradient boosting and SVM to predict cascading delays in question 2
+```{r}
+#Slicing the data set to 10000 random rows
+total_flights = total_flights[sample(nrow(total_flights), 10000), ]
+
+#Convert the different variables to columns
+total_flights$Punctuality <- factor(total_flights$Punctuality)
+total_flights$TimeofYear <- factor(total_flights$TimeofYear)
+
+#Get the roles
+num <- nrow(total_flights)
+
+#Get a random sample of 60%
+train_set <- sample(num, round(0.6 * num))
+
+#Get the other 40% that is not included in the training set
+test_set <- setdiff(1:num, train_set)
+
+#Set the classification task, name it as "total_flights", from "total_flights",
+#where the target variable is TimeofYear
+NewTask <- TaskClassif$new('total_flights', backend = total_flights, target = "TimeofYear")
+
+#Select 4 variables
+NewTask$select(c('Age', 'DepDelay', 'ArrDelay', 'Punctuality'))
+
+#Use Mean Squared Residual to measure the error
+measure <- msr('classif.ce')
+
+#Change the factors to numerical
+fencoder <- po("encode", method = "treatment",
+  affect_columns = selector_type("factor"))
+
+#With tuner, we use grid search 
+tuner <- tnr('grid_search')
+
+#Set the number of evaluation we do to 2
+terminator <- trm('evals', n_evals = 2)
+
+#Perform gradient boosting - ML
+learner_gb <- lrn("classif.xgboost")
+gc_gb <- po('imputemean') %>>%
+  fencoder %>>% po(learner_gb)
+glrn_gb <- GraphLearner$new(gc_gb)
+glrn_gb$train(NewTask, row_ids = train_set)
+glrn_gb$predict(NewTask, row_ids = test_set)$score() 
+
+#Perform support vector machine - ML
+learner_svm <- lrn("classif.svm")
+gc_svm <- po('imputemean') %>>% fencoder %>>% po(learner_svm)
+glrn_svm <- GraphLearner$new(gc_svm)
+glrn_svm$train(NewTask, row_ids = train_set)
+glrn_svm$predict(NewTask, row_ids = test_set)$score()
+
+#For reproducible results
+set.seed(1) 
+lrn_list <- list(
+  gc_gb,
+  gc_svm
+)
+
+#Drawing of the plots  
+bm_design <- benchmark_grid(task = NewTask, resamplings = rsmp('cv', folds = 2), learners = lrn_list)
+bmr <- benchmark(bm_design, store_models = TRUE)
+autoplot(bmr) + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + theme_classic()
+bmr$aggregate(measure)
+```
